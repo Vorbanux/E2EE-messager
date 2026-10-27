@@ -65,7 +65,7 @@ Toast {
     margin-bottom: 1;
 }
 
-RenameChatScreen {
+CreateChatScreen, RenameChatScreen, DeleteChatScreen {
     align: center middle;
     background: $background 80%;
 }
@@ -78,5 +78,25 @@ RenameChatScreen {
     margin: 0;
     width: 50%;
 }
-
 #rename-input:focus { border: heavy $accent; }
+
+#delete-chat-screen-grid {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    grid-rows: 1fr 3;
+    width: 50;
+    height: 8;
+    padding: 0 1;
+    border: thick $background 80%;
+    background: $surface;
+}
+#delete-chat-screen-question {
+    column-span: 2;
+    text-align: center;
+    width: 100%;
+    content-align: center middle;
+}
+
+#delete-chat-screen-cancel, #delete-chat-screen-delete {
+    width: 100%;
+}

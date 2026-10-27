@@ -1,15 +1,18 @@
 import json
+import shutil
 import socket
 import sys
 import uuid
 from pathlib import Path
+from typing import ClassVar
 
 from rich.markup import escape
 from textual.app import App, ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.binding import Binding, BindingType
+from textual.containers import Grid, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import (
+    Button,
     Footer,
     Header,
     Input,
@@ -32,7 +35,7 @@ current_chat_folder: Path | None = None
 
 chat_name_selected = "No chat selected"
 
-class CreateChatScreen(ModalScreen):
+class CreateChatScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         yield Input(placeholder="Enter chat name", id="rename-input")
 
@@ -44,12 +47,34 @@ class RenameChatScreen(ModalScreen[str | None]):
         event.stop()
         self.dismiss(event.input.value.strip() or None)
 
+class DeleteChatScreen(ModalScreen[bool]):
+    def __init__(self, chat_name: str) -> None:
+        super().__init__()
+        self.chat_name = chat_name
+        
+    def compose(self) -> ComposeResult:
+        short_name = truncate_str(self.chat_name, 35)
+        yield Grid(
+            Label(
+                f'Are you sure you want to delete chat\n"{short_name}"?',
+                id="delete-chat-screen-question",
+            ),
+            Button("Delete", variant="error", id="delete-chat-screen-delete"),
+            Button("Cancel", id="delete-chat-screen-cancel"),
+            id="delete-chat-screen-grid",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "delete-chat-screen-delete")
+
 class MessengerApp(App):
     CSS_PATH = styles_path / "style.tcss"
 
-    BINDINGS = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("n", "new_chat", "New Chat", show=True),
         Binding("r", "rename_chat", "Rename Chat", show=True),
+        Binding("d", "delete_chat", "Delete Chat", show=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -67,6 +92,8 @@ class MessengerApp(App):
     def on_mount(self) -> None:
         with open(config_path, "r", encoding="utf-8") as f:
             self.my_config = json.load(f)
+
+        self.query_one("#chat-list").border_title = "root\\data\\chats"
 
         self.known_chats: dict[str, Path] = {}
         self.chat_names:  dict[str, str]  = {}
@@ -110,7 +137,7 @@ class MessengerApp(App):
 
             self.known_chats[chat_id] = folder
             self.chat_names[chat_id]  = chat_name
-            item = ListItem(Label(chat_name), id=_widget_id(chat_id))
+            item = ListItem(Label(truncate_str(chat_name, 28)), id=_widget_id(chat_id))
             chat_list.append(item)
         # Remove non-existing chats from the list
         for chat_id in list(self.known_chats):
@@ -131,11 +158,13 @@ class MessengerApp(App):
         if not history.is_file():
             log.clear()
             return
-
+                
         mtime = history.stat().st_mtime
         if mtime == self._last_mtime:
             return
         self._last_mtime = mtime
+
+        self.query_one("#output").border_title = f"root\\data\\chats\\{current_chat_folder.name}\\history.txt"
 
         log.clear()
         with history.open(encoding="utf-8") as f:
@@ -154,7 +183,7 @@ class MessengerApp(App):
             return
 
         current_chat_folder = folder
-        self.title = self.chat_names[chat_id]
+        self.title = truncate_str(self.chat_names[chat_id], 28)
         self._last_mtime = 0.0
         self.refresh_history()
 
@@ -196,7 +225,6 @@ class MessengerApp(App):
             return
 
         self.push_screen(RenameChatScreen(), callback=self.on_rename_done)
-
     def on_rename_done(self, new_name: str | None ) -> None:
         if not new_name or current_chat_folder is None:
             return
@@ -223,7 +251,52 @@ class MessengerApp(App):
             pass
         self.title = new_name
         self.notify(f"Renamed to: {new_name}")
+
+    def action_delete_chat(self) -> None:
+        if current_chat_folder is None:
+            self.notify("No chat selected.")
+            return
+    
+        chat_id = current_chat_folder.name
+        name = self.chat_names.get(chat_id, chat_id)
+        self.push_screen(DeleteChatScreen(name), callback=self.on_delete_done)
+    def on_delete_done(self, confirmed: bool | None) -> None:
+        global current_chat_folder
+
+        if not confirmed or current_chat_folder is None:
+            return
+
+        chat_id = current_chat_folder.name
+        name    = self.chat_names.get(chat_id, chat_id)
+        folder  = current_chat_folder
+
+        try:
+            shutil.rmtree(folder)
+        except Exception as e:
+            self.notify(f"Error: {e}", severity="error")
+            return
+
+        self.known_chats.pop(chat_id, None)
+        self.chat_names.pop(chat_id, None)
+
+        for item in self.query_one("#chat-list", ListView).children:
+                if item.id == _widget_id(chat_id):
+                    item.remove()
+                    break
         
+        current_chat_folder = None
+        self._last_mtime    = 0.0
+        self.title          = chat_name_selected
+        self.query_one("#output", Log).clear()
+        
+        self.notify(f"Deleted chat: {name}")
+            
+
+def truncate_str(text: str, limit: int = 30) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit - 3] + "..."
+ 
 def get_my_local_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
