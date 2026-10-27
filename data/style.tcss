@@ -1,0 +1,82 @@
+Screen {
+    padding: 0;
+    background: $background;
+    layout: vertical;
+}
+
+HeaderIcon {
+    display: none;
+}
+
+#title { color: $primary; text-style: bold; }
+
+#inputbar {   
+    height: 3;
+    border: heavy $primary;
+    background: transparent;
+    padding: 0 0;
+    margin: 0;
+}
+
+#output {
+    height: 1fr;
+    width: 1fr;
+    border: heavy $primary;
+    background: transparent;
+    overflow-x: hidden;
+    overflow-y: auto;
+    text-wrap:  wrap;
+}
+
+#output ScrollBar { background: transparent; }
+ScrollBar { background: $primary; }
+
+#output:focus   { border: heavy $accent; }
+#inputbar:focus { border: heavy $accent; }
+#chat-list:focus { border: heavy $accent; }
+
+#main-container {
+    height: 1fr;
+    width: 1fr;
+}
+
+#sidebar {
+    width: 30;
+    height: 1fr;
+}
+
+#chat-list {
+    height: 1fr;
+    border: heavy $primary;
+    background: transparent;
+}
+
+#chat-area {
+    width: 1fr;
+    height: 1fr;
+    padding: 0;
+    margin: 0;
+}
+
+Toast {
+    width: 40;
+    max-width: 40%;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+RenameChatScreen {
+    align: center middle;
+    background: $background 80%;
+}
+
+#rename-input {
+    height: 3;
+    border: heavy $primary;
+    background: transparent;
+    padding: 0 0;
+    margin: 0;
+    width: 50%;
+}
+
+#rename-input:focus { border: heavy $accent; }
