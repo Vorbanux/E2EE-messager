@@ -3,15 +3,18 @@ import shutil
 import socket
 import sys
 import uuid
-from logging import exception
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Iterable
 
+# Using pyperclip since textual.app.copy_to_clipboard() uses OSC 52 ANSI-sequence,
+# which does not work on: MacOS Terminal, Gnome Terminal, Konsole.
+import pyperclip
 from rich.markup import escape
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding, BindingType
 from textual.containers import Grid, Horizontal, Vertical
-from textual.screen import ModalScreen
+from textual.css.query import NoMatches
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     Footer,
@@ -21,7 +24,6 @@ from textual.widgets import (
     ListItem,
     ListView,
     Log,
-    MaskedInput,
 )
 from textual.widgets.button import ButtonVariant
 
@@ -66,9 +68,8 @@ class ConfirmScreen(ModalScreen[bool]):
 class CreateChatScreen(ModalScreen[tuple[str, str] | None]):
     def compose(self) -> ComposeResult:
         yield Grid(
-            Label("Enter new chat name and uuid:", id="create-chat-label"),
             Input(placeholder="Enter chat name", id="input-name"),
-            MaskedInput(template="HHHHHHHH-HHHH-HHHH-HHHH-HHHHHHHHHHHH;_", id="input-uuid"),
+            Input(placeholder="Enter uuid", id="input-uuid"),
             Button("Create", variant="success", id="dialog-confirm-button"),
             Button("Cancel", variant="default", id="dialog-cancel-button"),
             id="create-chat-dialog-grid"
@@ -82,22 +83,27 @@ class CreateChatScreen(ModalScreen[tuple[str, str] | None]):
             return
 
         name = self.query_one("#input-name", Input).value.strip()
-        uuid_val = self.query_one("#input-uuid", MaskedInput).value.strip()
+        uuid_val = self.query_one("#input-uuid", Input).value.strip()
 
         if not name:
             self.notify("Chat name cannot be empty!", severity="error")
             return
 
-        uuid_input = self.query_one("#input-uuid", MaskedInput)
-        if not uuid_input.is_valid:
-            self.notify("UUID cannot be empty!", severity="error")
+        try:
+            uuid.UUID(uuid_val)
+        except ValueError:
+            self.notify("Invalid UUID format! (e.g. 123e4567-e89b-12d3-a456-426614174000)", severity="error")
             return
         
         self.dismiss((name, uuid_val))
     
-class RenameChatScreen(ModalScreen[str | None]):
+class InputScreen(ModalScreen[str | None]):
+    def __init__(self, placeholder: str = "placeholder"):
+        super().__init__()
+        self.placeholder = placeholder
+        
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Enter new chat name, type nothing and press Enter to cancel", id="dialog-input")
+        yield Input(placeholder=self.placeholder, id="dialog-input")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
@@ -110,9 +116,16 @@ class MessengerApp(App):
         Binding("n", "create_chat", "Create Chat", show=True),
         Binding("r", "rename_chat", "Rename Chat", show=True),
         Binding("d", "delete_chat", "Delete Chat", show=True),
-        Binding("c", "clear_chat_history", "Clear Chat History", show=True),
+        Binding("c", "clear_chat_history", "Clear Chat History", show=True)
     ]
 
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        yield from super().get_system_commands(screen)
+        yield SystemCommand("UUID:copy", "Copy your UUID to clipboard", self.command_copy_uuid)
+        yield SystemCommand("Name:copy", "Copy your name to clipboard", self.command_copy_name)
+        yield SystemCommand("UUID:change", "Change your UUID", self.command_change_uuid)
+        yield SystemCommand("Name:change", "Change your name", self.command_change_name)
+        
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-container"):
@@ -165,7 +178,7 @@ class MessengerApp(App):
             try:
                 with config_file_local.open(encoding="utf-8") as f:
                     chat_config = json.load(f)
-            except Exception:
+            except (json.JSONDecodeError, OSError):
                 chat_config = {}
 
             chat_name = chat_config.get("name") or folder.name
@@ -249,7 +262,7 @@ class MessengerApp(App):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         output = self.query_one("#output", Log)
-        if event.input.value == "":
+        if event.input.value == "" or event.input.id != "input":
             return
         if current_chat_folder is None:
             self.notify("No chat selected.")
@@ -303,7 +316,7 @@ class MessengerApp(App):
             self.notify("No chat selected.")
             return
 
-        self.push_screen(RenameChatScreen(), callback=self.on_rename_done)
+        self.push_screen(InputScreen("Enter new chat name, type nothing and press Enter to cancel"), callback=self.on_rename_done)
     def on_rename_done(self, new_name: str | None ) -> None:
         if not new_name or current_chat_folder is None:
             return
@@ -318,7 +331,7 @@ class MessengerApp(App):
             
             with config_file.open("w", encoding="utf-8") as f:
                 json.dump(config, f, ensure_ascii=False, indent=4)
-        except Exception as e:
+        except OSError as e:
             self.notify(f"Error: {e}", severity="error")
             return
 
@@ -326,7 +339,7 @@ class MessengerApp(App):
         try:
             item = self.query_one(f"#{_widget_id(chat_id)}", ListItem)
             item.query_one(Label).update(new_name)
-        except Exception:
+        except NoMatches:
             pass
         self.title = new_name
         self.notify(f"Renamed to: {new_name}")
@@ -358,7 +371,7 @@ class MessengerApp(App):
 
         try:
             shutil.rmtree(folder)
-        except Exception as e:
+        except OSError as e:
             self.notify(f"Error: {e}", severity="error")
             return
 
@@ -400,7 +413,7 @@ class MessengerApp(App):
         history_file = current_chat_folder / "history.txt"
         try:
             history_file.write_text("", encoding="utf-8")
-        except Exception as e:
+        except OSError as e:
             self.notify(f"Error {e}", severity="error")
             return
 
@@ -408,6 +421,59 @@ class MessengerApp(App):
         self.refresh_history()
         self.notify("Chat history cleared.")
 
+    def command_copy_uuid(self) -> None:
+        my_uuid = self.user_config.get("id")
+        if my_uuid:
+            pyperclip.copy(my_uuid)
+            self.notify("UUID copied to clipboard!")
+        else:
+            self.notify("UUID not found!", severity="error")
+    def command_copy_name(self) -> None:
+        my_name = self.user_config.get("name")
+        if my_name:
+            pyperclip.copy(my_name)
+            self.notify("Name copied to clipboard!")
+        else:
+            self.notify("Name not found!", severity="error")
+
+    def command_change_uuid(self) -> None:
+        self.push_screen(InputScreen("Enter new name"), callback=self.on_change_uuid_done)
+    def on_change_uuid_done(self, new_uuid: str | None) -> None:
+        if not new_uuid:
+            return
+            
+        try:
+            uuid.UUID(new_uuid)
+        except ValueError:
+            self.notify("Invalid UUID format!", severity="error")
+            return
+            
+        self.user_config["id"] = new_uuid
+        
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self.user_config, f, ensure_ascii=False)
+            self._last_config_mtime = config_path.stat().st_mtime
+            self.notify("UUID changed successfully")
+        except OSError as e:
+            self.notify(f"Error saving config: {e}", severity="error")
+        
+    def command_change_name(self) -> None:
+        self.push_screen(InputScreen("Enter new name"), callback=self.on_change_name_done)
+    def on_change_name_done(self, new_name: str | None) -> None:
+        if not new_name:
+            return
+
+        self.user_config["name"] = new_name
+
+        try:
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(self.user_config, f, ensure_ascii=False)
+            self._last_config_mtime = config_path.stat().st_mtime
+            self.sub_title = f" @{new_name}"
+            self.notify(f"Name changed to: {new_name}")
+        except OSError as e:
+            self.notify(f"Error saving config: {e}", severity="error")
 
 def truncate_str(text: str, limit: int = 30) -> str:
     if len(text) <= limit:
