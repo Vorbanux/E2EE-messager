@@ -21,6 +21,7 @@ from textual.widgets import (
     ListView,
     Log,
 )
+from textual.widgets.button import ButtonVariant
 
 import e2ee
 
@@ -35,6 +36,31 @@ current_chat_folder: Path | None = None
 
 chat_name_selected = "No chat selected"
 
+class ConfirmScreen(ModalScreen[bool]):
+    def __init__(
+        self, question: str,
+        confirm_label: str = "Confirm", confirm_variant: ButtonVariant = "error",
+        cancel_label: str = "Cancel", cancel_variant: ButtonVariant = "default"
+    ) -> None:
+        super().__init__()
+        self.question = question
+        self.confirm_label = confirm_label
+        self.confirm_variant: ButtonVariant = confirm_variant
+        self.cancel_label = cancel_label
+        self.cancel_variant: ButtonVariant = cancel_variant
+
+    def compose(self) -> ComposeResult:
+        yield Grid(
+            Label(self.question, id="dialog-question"),
+            Button(self.confirm_label, variant=self.confirm_variant, id="dialog-confirm-button"),
+            Button(self.cancel_label, variant=self.cancel_variant, id="dialog-cancel-button"),
+            id="dialog-grid",
+        )
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+        self.dismiss(event.button.id == "dialog-confirm-button")
+        
 class CreateChatScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
         yield Input(placeholder="Enter chat name", id="rename-input")
@@ -47,27 +73,6 @@ class RenameChatScreen(ModalScreen[str | None]):
         event.stop()
         self.dismiss(event.input.value.strip() or None)
 
-class DeleteChatScreen(ModalScreen[bool]):
-    def __init__(self, chat_name: str) -> None:
-        super().__init__()
-        self.chat_name = chat_name
-        
-    def compose(self) -> ComposeResult:
-        short_name = truncate_str(self.chat_name, 35)
-        yield Grid(
-            Label(
-                f'Are you sure you want to delete chat\n"{short_name}"?',
-                id="delete-chat-screen-question",
-            ),
-            Button("Delete", variant="error", id="delete-chat-screen-delete"),
-            Button("Cancel", id="delete-chat-screen-cancel"),
-            id="delete-chat-screen-grid",
-        )
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        event.stop()
-        self.dismiss(event.button.id == "delete-chat-screen-delete")
-
 class MessengerApp(App):
     CSS_PATH = styles_path / "style.tcss"
 
@@ -75,6 +80,7 @@ class MessengerApp(App):
         Binding("n", "new_chat", "New Chat", show=True),
         Binding("r", "rename_chat", "Rename Chat", show=True),
         Binding("d", "delete_chat", "Delete Chat", show=True),
+        Binding("c", "clear_chat_history", "Clear Chat History", show=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -85,26 +91,30 @@ class MessengerApp(App):
 
             with Vertical(id="chat-area"):
                 yield Log(id="output", auto_scroll=True, highlight=True)
-                yield Input(placeholder="Press / to type", id="inputbar")
+                yield Input(placeholder="Enter a message...", id="input")
 
         yield Footer()
 
     def on_mount(self) -> None:
         with open(config_path, "r", encoding="utf-8") as f:
-            self.my_config = json.load(f)
+            self.user_config = json.load(f)
 
         self.query_one("#chat-list").border_title = "root\\data\\chats"
+        self.query_one("#output").border_title    = "no chat selected"
 
         self.known_chats: dict[str, Path] = {}
         self.chat_names:  dict[str, str]  = {}
         self._last_mtime: float = 0.0
+        self._last_config_mtime: float = 0.0
 
         self.load_chats()
+        
         self.set_interval(0.5, self.load_chats)
         self.set_interval(0.5, self.refresh_history)
-
+        self.set_interval(0.5, self.refresh_user_config)
+        
         self.title = chat_name_selected
-        self.sub_title = " @interfector4ngelorum"
+        self.refresh_user_config()
 
     def load_chats(self) -> None:
         # Reads chats/ and adds only new chats to ListView
@@ -150,11 +160,17 @@ class MessengerApp(App):
                         break
 
     def refresh_history(self) -> None:
-        if current_chat_folder is None:
-            return
-        history = current_chat_folder / "history.txt"
-
         log = self.query_one("#output", Log)
+        
+        if current_chat_folder is None:
+            if log.border_title != "no chat selected":
+                log.border_title = "no chat selected"
+                log.clear()
+                log.write_line("No chat selected.")
+                log.write_line("Press 'n' to create a new chat.")
+            return
+            
+        history = current_chat_folder / "history.txt"
         if not history.is_file():
             log.clear()
             return
@@ -170,6 +186,22 @@ class MessengerApp(App):
         with history.open(encoding="utf-8") as f:
             for line in f:
                 log.write_line(line.strip("\n"))
+    def refresh_user_config(self) -> None:
+        if not config_path.exists():
+            return
+
+        mtime = config_path.stat().st_mtime
+        if mtime == self._last_config_mtime:
+            return
+        self._last_config_mtime = mtime
+
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                self.user_config = json.load(f)
+            user_name = self.user_config.get("name", "user")
+            self.sub_title = f" @{user_name}"
+        except Exception:
+            pass
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:
         global current_chat_folder
@@ -195,7 +227,7 @@ class MessengerApp(App):
             self.notify("No chat selected.")
             return
 
-        user_name = self.my_config.get("name", "user")
+        user_name = self.user_config.get("name", "user")
         safe_name = escape(user_name)
         safe_text = escape(event.value)
 
@@ -218,7 +250,6 @@ class MessengerApp(App):
 
         self.load_chats()
         self.notify(f"Created Chat: {new_id[:8]}")
-
     def action_rename_chat(self) -> None:
         if current_chat_folder is None:
             self.notify("No chat selected.")
@@ -259,7 +290,14 @@ class MessengerApp(App):
     
         chat_id = current_chat_folder.name
         name = self.chat_names.get(chat_id, chat_id)
-        self.push_screen(DeleteChatScreen(name), callback=self.on_delete_done)
+        short_name = truncate_str(name, 35)
+        self.push_screen(
+            ConfirmScreen(
+                question=f'Are you sure you want to delete chat\n"{short_name}"?', 
+                confirm_label="Delete",
+            ), 
+            callback=self.on_delete_done
+        )
     def on_delete_done(self, confirmed: bool | None) -> None:
         global current_chat_folder
 
@@ -287,10 +325,41 @@ class MessengerApp(App):
         current_chat_folder = None
         self._last_mtime    = 0.0
         self.title          = chat_name_selected
-        self.query_one("#output", Log).clear()
         
+        self.refresh_history()
         self.notify(f"Deleted chat: {name}")
-            
+
+    def action_clear_chat_history(self) -> None:
+        if current_chat_folder is None:
+            self.notify("No chat selected.")
+            return
+
+        chat_id = current_chat_folder.name
+        name = self.chat_names.get(chat_id, chat_id)
+        short_name = truncate_str(name, 35)
+
+        self.push_screen(
+            ConfirmScreen(
+                question=f'Are you sure you want to clear history of chat\n"{short_name}"?',
+                confirm_label="Clear",
+            ), 
+            callback=self.on_clear_done
+        )
+    def on_clear_done(self, confirmed: bool | None) -> None:
+        if not confirmed or current_chat_folder is None:
+            return
+
+        history_file = current_chat_folder / "history.txt"
+        try:
+            history_file.write_text("", encoding="utf-8")
+        except Exception as e:
+            self.notify(f"Error {e}", severity="error")
+            return
+
+        self._last_mtime = 0.0
+        self.refresh_history()
+        self.notify("Chat history cleared.")
+
 
 def truncate_str(text: str, limit: int = 30) -> str:
     if len(text) <= limit:

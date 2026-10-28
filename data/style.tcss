@@ -10,13 +10,14 @@ HeaderIcon {
 
 #title { color: $primary; text-style: bold; }
 
-#inputbar {   
+#input {   
     height: 3;
     border: heavy $primary;
     background: transparent;
     padding: 0 0;
     margin: 0;
 }
+#input:focus { border: heavy $accent; }
 
 #output {
     height: 1fr;
@@ -27,29 +28,24 @@ HeaderIcon {
     overflow-y: auto;
     text-wrap:  wrap;
 }
+#output:focus   { border: heavy $accent; }
 
 #output ScrollBar { background: transparent; }
 ScrollBar { background: $primary; }
 
-#output:focus   { border: heavy $accent; }
-#inputbar:focus { border: heavy $accent; }
-#chat-list:focus { border: heavy $accent; }
-
-#main-container {
-    height: 1fr;
-    width: 1fr;
-}
+#main-container { height: 1fr; width: 1fr; }
 
 #sidebar {
-    width: 30;
+    width: 15%;
+    min-width: 15;
     height: 1fr;
 }
-
 #chat-list {
     height: 1fr;
     border: heavy $primary;
     background: transparent;
 }
+#chat-list:focus { border: heavy $accent; }
 
 #chat-area {
     width: 1fr;
@@ -65,7 +61,7 @@ Toast {
     margin-bottom: 1;
 }
 
-CreateChatScreen, RenameChatScreen, DeleteChatScreen {
+ConfirmScreen, CreateChatScreen, RenameChatScreen {
     align: center middle;
     background: $background 80%;
 }
@@ -80,7 +76,7 @@ CreateChatScreen, RenameChatScreen, DeleteChatScreen {
 }
 #rename-input:focus { border: heavy $accent; }
 
-#delete-chat-screen-grid {
+#dialog-grid {
     grid-size: 2;
     grid-gutter: 1 2;
     grid-rows: 1fr 3;
@@ -90,13 +86,10 @@ CreateChatScreen, RenameChatScreen, DeleteChatScreen {
     border: thick $background 80%;
     background: $surface;
 }
-#delete-chat-screen-question {
+#dialog-question {
     column-span: 2;
     text-align: center;
     width: 100%;
     content-align: center middle;
 }
-
-#delete-chat-screen-cancel, #delete-chat-screen-delete {
-    width: 100%;
-}
+#dialog-confirm-button, #dialog-cancel-button { width: 100%; }
