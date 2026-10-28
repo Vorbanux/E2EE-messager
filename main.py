@@ -3,6 +3,7 @@ import shutil
 import socket
 import sys
 import uuid
+from logging import exception
 from pathlib import Path
 from typing import ClassVar
 
@@ -20,6 +21,7 @@ from textual.widgets import (
     ListItem,
     ListView,
     Log,
+    MaskedInput,
 )
 from textual.widgets.button import ButtonVariant
 
@@ -60,14 +62,42 @@ class ConfirmScreen(ModalScreen[bool]):
     def on_button_pressed(self, event: Button.Pressed) -> None:
         event.stop()
         self.dismiss(event.button.id == "dialog-confirm-button")
-        
-class CreateChatScreen(ModalScreen[str | None]):
+  
+class CreateChatScreen(ModalScreen[tuple[str, str] | None]):
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Enter chat name", id="rename-input")
+        yield Grid(
+            Label("Enter new chat name and uuid:", id="create-chat-label"),
+            Input(placeholder="Enter chat name", id="input-name"),
+            MaskedInput(template="HHHHHHHH-HHHH-HHHH-HHHH-HHHHHHHHHHHH;_", id="input-uuid"),
+            Button("Create", variant="success", id="dialog-confirm-button"),
+            Button("Cancel", variant="default", id="dialog-cancel-button"),
+            id="create-chat-dialog-grid"
+        )
 
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        event.stop()
+
+        if event.button.id == "dialog-cancel-button":
+            self.dismiss(None)
+            return
+
+        name = self.query_one("#input-name", Input).value.strip()
+        uuid_val = self.query_one("#input-uuid", MaskedInput).value.strip()
+
+        if not name:
+            self.notify("Chat name cannot be empty!", severity="error")
+            return
+
+        uuid_input = self.query_one("#input-uuid", MaskedInput)
+        if not uuid_input.is_valid:
+            self.notify("UUID cannot be empty!", severity="error")
+            return
+        
+        self.dismiss((name, uuid_val))
+    
 class RenameChatScreen(ModalScreen[str | None]):
     def compose(self) -> ComposeResult:
-        yield Input(placeholder="Enter new chat name, type nothing and press Enter to cancel", id="rename-input")
+        yield Input(placeholder="Enter new chat name, type nothing and press Enter to cancel", id="dialog-input")
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.stop()
@@ -77,7 +107,7 @@ class MessengerApp(App):
     CSS_PATH = styles_path / "style.tcss"
 
     BINDINGS: ClassVar[list[BindingType]] = [
-        Binding("n", "new_chat", "New Chat", show=True),
+        Binding("n", "create_chat", "Create Chat", show=True),
         Binding("r", "rename_chat", "Rename Chat", show=True),
         Binding("d", "delete_chat", "Delete Chat", show=True),
         Binding("c", "clear_chat_history", "Clear Chat History", show=True),
@@ -166,8 +196,6 @@ class MessengerApp(App):
             if log.border_title != "no chat selected":
                 log.border_title = "no chat selected"
                 log.clear()
-                log.write_line("No chat selected.")
-                log.write_line("Press 'n' to create a new chat.")
             return
             
         history = current_chat_folder / "history.txt"
@@ -238,18 +266,38 @@ class MessengerApp(App):
 
         event.input.value = ""
 
-    def action_new_chat(self) -> None:
-        new_id = str(uuid.uuid4())
-        folder = Path(chats_path) / new_id
-        folder.mkdir(parents=True, exist_ok=True)
+    def action_create_chat(self) -> None:
+        self.push_screen(CreateChatScreen(), callback=self.on_create_chat_done)
+        
+    def on_create_chat_done(self, result: tuple[str, str] | None) -> None:
+        if not result:
+            return
 
-        with (folder / "config.json").open("w", encoding="utf-8") as f:
-            json.dump({"name": f"Chat {new_id[:8]}"}, f, ensure_ascii=False, indent=4)
+        chat_name, provided_uuid = result
 
-        (folder / "history.txt").touch()
+        try:
+            uuid.UUID(provided_uuid)
+        except ValueError:
+            self.notify("Invalid UUID format!", severity="error")
+            return
+
+        folder = Path(chats_path) / provided_uuid 
+        if folder.exists():
+            self.notify(f"Chat with UUID {provided_uuid[:8]} already exists!", severity="error")
+            return
+
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            with (folder / "config.json").open("w", encoding="utf-8") as f:
+                json.dump({"name": chat_name}, f, ensure_ascii=False, indent=4)
+            (folder / "history.txt").touch()
+        except Exception as e:
+            self.notify(f"Error creating chat: {e}", severity="error")
+            return
 
         self.load_chats()
-        self.notify(f"Created Chat: {new_id[:8]}")
+        self.notify(f"Created chat: {chat_name} ({provided_uuid[:8]})")
+        
     def action_rename_chat(self) -> None:
         if current_chat_folder is None:
             self.notify("No chat selected.")
@@ -401,6 +449,16 @@ def ensure_files() -> None:
 
     if not file.get("id"):
         file["id"] = str(uuid.uuid4())
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(file, f, ensure_ascii=False, indent=4)
+            
+    if not file.get("name"):
+        file["name"] = "user"
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(file, f, ensure_ascii=False, indent=4)
+            
+    if not file.get("ip"):
+        file["ip"] = get_my_local_ip()
         with open(config_path, "w", encoding="utf-8") as f:
             json.dump(file, f, ensure_ascii=False, indent=4)
 

@@ -66,7 +66,7 @@ ConfirmScreen, CreateChatScreen, RenameChatScreen {
     background: $background 80%;
 }
 
-#rename-input {
+#dialog-input {
     height: 3;
     border: heavy $primary;
     background: transparent;
@@ -74,7 +74,7 @@ ConfirmScreen, CreateChatScreen, RenameChatScreen {
     margin: 0;
     width: 50%;
 }
-#rename-input:focus { border: heavy $accent; }
+#dialog-input:focus { border: heavy $accent; }
 
 #dialog-grid {
     grid-size: 2;
@@ -93,3 +93,31 @@ ConfirmScreen, CreateChatScreen, RenameChatScreen {
     content-align: center middle;
 }
 #dialog-confirm-button, #dialog-cancel-button { width: 100%; }
+
+#create-chat-dialog-grid {
+    grid-size: 2;
+    grid-gutter: 1 2;
+    width: 60;
+    height: auto;
+    padding: 0 0;
+    border: thick $background 80%;
+    background: $surface;
+}
+#create-chat-label {
+    column-span: 2;
+    width: 100%;
+    height: 1;
+    margin: 0;
+    content-align: center middle;
+}
+#input-name, #input-uuid {
+    column-span: 2;
+    width: 100%;
+    height: 3;
+    border: heavy $primary;
+    background: transparent;
+    padding: 0 0;
+    margin: 0;
+    margin-bottom: 0;
+}
+#input-name:focus, #input-uuid:focus { border: heavy $accent; }
